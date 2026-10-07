@@ -1,0 +1,76 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+
+jobs:
+  build-ipa:
+    name: Build iOS IPA
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Detect Flutter Project Directory
+        id: dir-check
+        run: |
+          if [ -d "mobile" ] && [ -f "mobile/pubspec.yaml" ]; then
+            echo "PROJECT_DIR=mobile" >> $GITHUB_ENV
+            echo "Project found in 'mobile' subdirectory."
+          else
+            echo "PROJECT_DIR=." >> $GITHUB_ENV
+            echo "Project found in root directory."
+          fi
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Get Flutter Packages
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter pub get
+
+      - name: Verify Flutter & Xcode Environment
+        run: flutter doctor -v
+
+      - name: Build iOS App Bundle (Release)
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          flutter build ios --release --no-codesign
+
+      - name: Create IPA Package (Standard Payload Structure)
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          echo "Packaging Runner.app into IPA..."
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -r Runner.app Payload/
+          zip -r -9 ../../../PhotoFrameFancy.ipa Payload
+          cd ../../..
+          echo "IPA created successfully:"
+          ls -lh PhotoFrameFancy.ipa
+
+      - name: Upload IPA to GitHub Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhotoFrameFancy-iOS-IPA
+          path: ${{ env.PROJECT_DIR }}/PhotoFrameFancy.ipa
+          retention-days: 14
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.PROJECT_DIR }}/PhotoFrameFancy.ipa
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
